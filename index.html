@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>People Counter — Store Monitor</title>
+  <link rel="stylesheet" href="style.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:wght@400;600;700&display=swap" rel="stylesheet"/>
+</head>
+<body>
+
+  <!-- TOP BAR -->
+  <header class="topbar">
+    <div class="topbar-left">
+      <span class="logo-dot"></span>
+      <span class="logo-text">STORE<strong>WATCH</strong></span>
+    </div>
+    <div class="topbar-center">
+      <span class="live-badge">● LIVE</span>
+      <span id="clock" class="clock"></span>
+    </div>
+    <div class="topbar-right">
+      <button id="btn-setup" onclick="window.location.href='setup.html'">⚙ Setup</button>
+    </div>
+  </header>
+
+  <!-- MAIN LAYOUT -->
+  <main class="main-grid">
+
+    <!-- LEFT: CAMERA FEED -->
+    <section class="feed-section">
+      <div class="feed-label">CAMERA FEED</div>
+      <div class="canvas-wrapper">
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="canvas"></canvas>
+        <div class="scan-line"></div>
+      </div>
+      <div class="feed-controls">
+        <button id="btn-webcam" class="ctrl-btn active">💻 Webcam</button>
+        <button id="btn-ip" class="ctrl-btn">📡 IP Camera</button>
+        <div id="ip-input-group" class="ip-input-group hidden">
+          <input id="ip-url" type="text" placeholder="rtsp:// or http://..." />
+          <button id="btn-connect-ip" class="ctrl-btn">Connect</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- RIGHT: STATS PANEL -->
+    <aside class="stats-panel">
+
+      <!-- OCCUPANCY CARD -->
+      <div class="stat-card occupancy-card">
+        <div class="stat-label">CURRENT OCCUPANCY</div>
+        <div class="stat-value" id="occupancy">0</div>
+        <div class="occupancy-bar-wrap">
+          <div class="occupancy-bar" id="occupancy-bar"></div>
+        </div>
+        <div class="occupancy-cap">Capacity: <span id="cap-display">50</span></div>
+      </div>
+
+      <!-- IN / OUT ROW -->
+      <div class="inout-row">
+        <div class="stat-card in-card">
+          <div class="stat-label">↓ ENTERED</div>
+          <div class="stat-value in-val" id="count-in">0</div>
+        </div>
+        <div class="stat-card out-card">
+          <div class="stat-label">↑ EXITED</div>
+          <div class="stat-value out-val" id="count-out">0</div>
+        </div>
+      </div>
+
+      <!-- STATUS -->
+      <div class="stat-card status-card">
+        <div class="stat-label">STORE STATUS</div>
+        <div class="status-badge" id="status-badge">OPEN</div>
+        <div class="status-sub" id="status-sub">Normal traffic</div>
+      </div>
+
+      <!-- MODEL STATUS -->
+      <div class="stat-card model-card">
+        <div class="stat-label">DETECTION ENGINE</div>
+        <div class="model-row">
+          <span class="model-dot" id="model-dot"></span>
+          <span class="model-name" id="model-status">Loading COCO-SSD...</span>
+        </div>
+        <div class="model-fps">FPS: <span id="fps-display">--</span></div>
+      </div>
+
+      <!-- RESET -->
+      <button class="reset-btn" id="btn-reset">↺ Reset Counts</button>
+
+      <!-- LOG -->
+      <div class="stat-card log-card">
+        <div class="stat-label">ACTIVITY LOG</div>
+        <ul id="activity-log" class="activity-log">
+          <li class="log-placeholder">Waiting for detection...</li>
+        </ul>
+      </div>
+
+    </aside>
+  </main>
+
+  <!-- SCRIPTS -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+  <script src="config-loader.js"></script>
+  <script src="signals.js"></script>
+  <script src="tracker.js"></script>
+  <script src="counter.js"></script>
+  <script src="canvas.js"></script>
+  <script src="alert.js"></script>
+  <script src="detector.js"></script>
+</body>
+</html>
