@@ -120,9 +120,9 @@ const Tracker = (() => {
   function updatePerson(person, newCentroid) {
     const prev = person.centroid;
 
-    // compute movement direction based on vertical delta
-    const dy = newCentroid.cy - prev.y;
-    if      (Math.abs(dy) > 0.005) person.direction = dy > 0 ? 'down' : 'up';
+    // compute movement direction based on horizontal delta
+    const dx = newCentroid.cx - prev.x;
+    if      (Math.abs(dx) > 0.005) person.direction = dx > 0 ? 'right' : 'left';
     // (0.005 = ~5px on a 1000px canvas — filters jitter)
 
     // update centroid

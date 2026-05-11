@@ -85,11 +85,13 @@ const Canvas = (() => {
   }
 
   // ---------- VIRTUAL LINE ----------
-  // Horizontal line across the feed at CONFIG.linePosition (0.0 – 1.0)
+  // Vertical line across the feed at CONFIG.linePosition (0.0 – 1.0)
+  // Left → Right crossing  = IN
+  // Right → Left crossing  = OUT
   function drawVirtualLine(W, H) {
-    const lineY = Math.floor(H * CONFIG.linePosition);
+    const lineX = Math.floor(W * CONFIG.linePosition);
 
-    // dashed line
+    // dashed vertical line
     ctx.save();
     ctx.setLineDash([12, 6]);
     ctx.lineWidth   = 2;
@@ -97,24 +99,33 @@ const Canvas = (() => {
     ctx.shadowColor = COLORS.line;
     ctx.shadowBlur  = 8;
     ctx.beginPath();
-    ctx.moveTo(0, lineY);
-    ctx.lineTo(W, lineY);
+    ctx.moveTo(lineX, 0);
+    ctx.lineTo(lineX, H);
     ctx.stroke();
     ctx.restore();
 
-    // line label — left side
+    // label at the top of the line
     ctx.save();
     ctx.fillStyle = COLORS.lineLabel;
     ctx.font      = '10px Share Tech Mono, monospace';
-    ctx.textAlign = 'left';
-    ctx.fillText('── COUNTING LINE', 10, lineY - 6);
+    ctx.textAlign = 'center';
+    ctx.fillText('COUNTING LINE', lineX, 16);
 
-    // IN / OUT direction labels
+    // IN label — right side of line
+    ctx.save();
     ctx.font      = '9px Share Tech Mono, monospace';
     ctx.fillStyle = 'rgba(0,230,118,0.7)';
-    ctx.fillText('▼ IN',  W - 48, lineY - 6);
+    ctx.textAlign = 'left';
+    ctx.fillText('► IN',  lineX + 8, H / 2);
+    ctx.restore();
+
+    // OUT label — left side of line
+    ctx.save();
     ctx.fillStyle = 'rgba(255,82,82,0.7)';
-    ctx.fillText('▲ OUT', W - 48, lineY + 16);
+    ctx.textAlign = 'right';
+    ctx.fillText('◄ OUT', lineX - 8, H / 2);
+    ctx.restore();
+
     ctx.restore();
   }
 
@@ -223,7 +234,7 @@ const Canvas = (() => {
 
   // ---------- DIRECTION ARROW ----------
   function drawDirectionArrow(cx, y, direction) {
-    const arrow = direction === 'down' ? '▼' : '▲';
+    const arrow = direction === 'right' ? '►' : '◄';
     ctx.save();
     ctx.fillStyle = COLORS.arrow;
     ctx.font      = '14px Arial';

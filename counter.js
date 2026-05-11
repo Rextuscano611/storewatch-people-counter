@@ -1,121 +1,158 @@
 // ================================================
-//  counter.js — Line Crossing Logic
+//  counter.js — Line Crossing Logic (Fixed)
 //
-//  Problem it solves:
-//  Tracker tells us WHERE each person is each frame.
-//  This file answers: "Did this person just cross
-//  the virtual line, and which way did they go?"
+//  Bugs fixed vs previous version:
 //
-//  Rule:
-//  Person moves top → bottom (y increases) = IN  ↓
-//  Person moves bottom → top (y decreases) = OUT ↑
+//  BUG 1 — crossedLine flag:
+//    Old: Once a person crossed IN, they could NEVER
+//         be counted OUT. Flag was never reset.
+//    Fix: Removed. Each person can be counted both
+//         IN and OUT independently.
 //
-//  Why track previousY?
-//  A person's centroid crosses the line between
-//  two frames. We compare where they WERE (prev)
-//  vs where they ARE (current) to detect the cross.
+//  BUG 2 — No cooldown:
+//    Old: If tracker briefly lost a person and gave
+//         them a new ID, same physical person got
+//         counted again immediately.
+//    Fix: Per-person cooldown (30 frames) after each
+//         crossing. Can't count again until it clears.
+//
+//  BUG 3 — Counting too early:
+//    Old: A person detected for the first time could
+//         be counted immediately if their first X
+//         position happened to be on the wrong side.
+//    Fix: MIN_TRACK_FRAMES — must be tracked for at
+//         least 5 frames before counting is allowed.
 // ================================================
 
 const Counter = (() => {
 
-  // ---------- STATE ----------
+  // ---------- COUNTS ----------
   let countIN  = 0;
   let countOUT = 0;
 
-  // previousY: track last centroid Y for each person
-  // Map: personID → last normalised Y (0–1)
-  const previousY = new Map();
+  // ---------- PER-PERSON CROSSING STATE ----------
+  // Map: id → {
+  //   prevX         : number,    last normalised X
+  //   trackFrames   : number,    frames seen so far
+  //   cooldown      : number,    frames until next crossing allowed
+  //   lastCrossDir  : 'in'|'out'|null
+  // }
+  const personState = new Map();
+
+  // ---------- TUNING ----------
+  const MIN_TRACK_FRAMES = 5;    // must be tracked this many frames before counting
+  const CROSS_COOLDOWN   = 30;   // frames to wait before same person can cross again
 
   // ---------- DOM REFS ----------
-  const elIn        = document.getElementById('count-in');
-  const elOut       = document.getElementById('count-out');
-  const elOccupancy = document.getElementById('occupancy');
-  const elOccBar    = document.getElementById('occupancy-bar');
-  const elCapDisplay= document.getElementById('cap-display');
+  const elIn          = document.getElementById('count-in');
+  const elOut         = document.getElementById('count-out');
+  const elOccupancy   = document.getElementById('occupancy');
+  const elOccBar      = document.getElementById('occupancy-bar');
+  const elCapDisplay  = document.getElementById('cap-display');
   const elStatusBadge = document.getElementById('status-badge');
   const elStatusSub   = document.getElementById('status-sub');
 
   // ---------- INIT ----------
   function init() {
-    // set capacity display from CONFIG
     elCapDisplay.textContent = CONFIG.storeCapacity;
 
-    // listen for tracker updates every frame
     Signals.on('tracker:updated', ({ tracked }) => {
       checkCrossings(tracked);
     });
 
-    // clean up previousY when a person is removed
     Signals.on('tracker:removed', ({ id }) => {
-      previousY.delete(id);
+      personState.delete(id);
     });
 
     console.log('[Counter] Ready ✓');
   }
 
   // ---------- CHECK CROSSINGS ----------
-  // Called every frame with the full tracked Map
   function checkCrossings(tracked) {
-    const lineY = CONFIG.linePosition;   // normalised 0–1
+    const lineX = CONFIG.linePosition;
 
     tracked.forEach((person) => {
-      const { id, centroid, crossedLine } = person;
-      const currY = centroid.y;
-      const prevY = previousY.get(id);
+      const { id } = person;
+      const currX  = person.centroid.x;
 
-      // first time we see this person — just store Y, don't count yet
-      if (prevY === undefined) {
-        previousY.set(id, currY);
+      // first time seeing this person
+      if (!personState.has(id)) {
+        personState.set(id, {
+          prevX       : currX,
+          trackFrames : 1,
+          cooldown    : 0,
+          lastCrossDir: null,
+        });
         return;
       }
 
-      // only count each person ONCE (crossedLine flag)
-      if (!crossedLine) {
-        // detect crossing: did Y move from one side of lineY to the other?
-        const wasAbove = prevY < lineY;
-        const isBelow  = currY >= lineY;
-        const wasBelow = prevY >= lineY;
-        const isAbove  = currY < lineY;
+      const state = personState.get(id);
 
-        if (wasAbove && isBelow) {
-          // crossed top → bottom = ENTERING store
-          registerCrossing(person, 'in');
-        } else if (wasBelow && isAbove) {
-          // crossed bottom → top = EXITING store
-          registerCrossing(person, 'out');
-        }
+      // increment frame counter and tick cooldown
+      state.trackFrames++;
+      if (state.cooldown > 0) state.cooldown--;
+
+      const prevX = state.prevX;
+
+      // not tracked long enough yet
+      if (state.trackFrames < MIN_TRACK_FRAMES) {
+        state.prevX = currX;
+        return;
       }
 
-      // always update previousY for next frame
-      previousY.set(id, currY);
+      // still in cooldown after last crossing
+      if (state.cooldown > 0) {
+        state.prevX = currX;
+        return;
+      }
+
+      // detect crossing
+      const wasLeft  = prevX < lineX;
+      const isRight  = currX >= lineX;
+      const wasRight = prevX >= lineX;
+      const isLeft   = currX < lineX;
+
+      if (wasLeft && isRight) {
+        registerCrossing(person, state, 'in');
+      } else if (wasRight && isLeft) {
+        registerCrossing(person, state, 'out');
+      }
+
+      state.prevX = currX;
     });
   }
 
-  // ---------- REGISTER A CROSSING ----------
-  function registerCrossing(person, type) {
-    // mark person as counted so we don't double-count
-    person.crossedLine  = true;
-    person.justCrossed  = type;           // canvas uses this for color flash
+  // ---------- REGISTER CROSSING ----------
+  function registerCrossing(person, state, type) {
+
+    // prevent jitter: same direction twice in a row
+    if (state.lastCrossDir === type) {
+      state.cooldown = CROSS_COOLDOWN;
+      return;
+    }
+
+    state.cooldown     = CROSS_COOLDOWN;
+    state.lastCrossDir = type;
+    person.justCrossed = type;
 
     if (type === 'in') {
       countIN++;
-      Signals.emit('counter:in',  { countIN, countOUT, occupancy: getOccupancy() });
+      Signals.emit('counter:in', { countIN, countOUT, occupancy: getOccupancy() });
     } else {
-      countOUT = Math.max(0, countOUT - 0);  // never go below 0
       countOUT++;
       Signals.emit('counter:out', { countIN, countOUT, occupancy: getOccupancy() });
     }
 
-    // update all UI
     updateUI();
     Canvas.flashEdge(type);
 
-    const occ = getOccupancy();
-    console.log(`[Counter] ${type.toUpperCase()} | IN: ${countIN} | OUT: ${countOUT} | Occupancy: ${occ}`);
+    console.log(
+      `[Counter] ${type.toUpperCase()} P${person.id} | ` +
+      `IN: ${countIN} | OUT: ${countOUT} | Occupancy: ${getOccupancy()}`
+    );
   }
 
   // ---------- OCCUPANCY ----------
-  // Current people inside = entered - exited (floor at 0)
   function getOccupancy() {
     return Math.max(0, countIN - countOUT);
   }
@@ -126,24 +163,16 @@ const Counter = (() => {
     const cap = CONFIG.storeCapacity;
     const pct = Math.min((occ / cap) * 100, 100);
 
-    // IN count
-    setWithBump(elIn,  countIN);
-
-    // OUT count
-    setWithBump(elOut, countOUT);
-
-    // Occupancy
+    setWithBump(elIn,        countIN);
+    setWithBump(elOut,       countOUT);
     setWithBump(elOccupancy, occ);
 
-    // Occupancy bar
-    elOccBar.style.width = pct + '%';
-    elOccBar.style.background = pct > 90
-      ? 'var(--accent-out)'       // red  — near capacity
-      : pct > 70
-        ? '#ffd740'               // amber — getting busy
-        : 'var(--accent-ui)';     // blue  — normal
+    elOccBar.style.width      = pct + '%';
+    elOccBar.style.background =
+      pct > 90 ? 'var(--accent-out)' :
+      pct > 70 ? '#ffd740'           :
+      'var(--accent-ui)';
 
-    // Store status badge
     updateStatusBadge(occ, cap, pct);
   }
 
@@ -168,11 +197,11 @@ const Counter = (() => {
     }
   }
 
-  // ---------- BUMP ANIMATION HELPER ----------
+  // ---------- BUMP ANIMATION ----------
   function setWithBump(el, value) {
     el.textContent = value;
     el.classList.remove('bump');
-    void el.offsetWidth;             // force reflow to restart animation
+    void el.offsetWidth;
     el.classList.add('bump');
   }
 
@@ -180,20 +209,17 @@ const Counter = (() => {
   function reset() {
     countIN  = 0;
     countOUT = 0;
-    previousY.clear();
+    personState.clear();
     updateUI();
     console.log('[Counter] Reset ✓');
   }
 
-  // ---------- GETTERS ----------
   function getCounts() {
     return { countIN, countOUT, occupancy: getOccupancy() };
   }
 
-  // ---------- PUBLIC API ----------
   return { init, reset, getCounts, getOccupancy };
 
 })();
 
-// Boot
 window.addEventListener('DOMContentLoaded', () => Counter.init());
