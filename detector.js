@@ -76,38 +76,62 @@ const Detector = (() => {
   }
 
   // ---------- START IP CAMERA ----------
-  // IP cameras that expose an MJPEG HTTP stream can be loaded into <video>
-  // For RTSP streams, you need a proxy server — we handle that in setup.html
+  // Receives JPEG frames via WebSocket from rtsp-proxy.js
+  // Draws each frame onto a hidden canvas, then COCO-SSD reads that canvas
   async function startIPCamera(url) {
     try {
       stopStream();
-      video = document.getElementById('video');
 
-      // If it's an HTTP stream (MJPEG), load directly
-      if (url.startsWith('http')) {
-        video.srcObject = null;
-        video.src = url;
-        video.crossOrigin = 'anonymous';
+      // convert http://localhost:8090/stream → ws://localhost:8090/stream
+      const wsUrl = url.replace('http://', 'ws://').replace('https://', 'wss://');
 
-        await new Promise((resolve, reject) => {
-          video.onloadedmetadata = () => { video.play(); resolve(); };
-          video.onerror = () => reject(new Error('Cannot load IP camera stream'));
-          setTimeout(() => reject(new Error('IP camera timeout')), 10000);
-        });
-
-        Canvas.resizeToVideo(video);
-        startDetectionLoop();
-        Signals.emit('camera:started', { source: 'ip', url });
-        console.log('[Detector] IP Camera connected ✓');
-
-      } else {
-        // RTSP — not directly supported in browser
-        // A Node.js/ffmpeg proxy would forward it as HLS or MJPEG
-        console.warn('[Detector] RTSP streams require a proxy server. See setup.html.');
-        Signals.emit('camera:error', {
-          message: 'RTSP streams need a local proxy. Use HTTP MJPEG URL or see setup.html.'
-        });
+      // create (or reuse) a hidden canvas to hold IP camera frames
+      let ipCanvas = document.getElementById('ip-canvas');
+      if (!ipCanvas) {
+        ipCanvas = document.createElement('canvas');
+        ipCanvas.id             = 'ip-canvas';
+        ipCanvas.width          = 1280;
+        ipCanvas.height         = 720;
+        ipCanvas.style.display  = 'none';
+        document.body.appendChild(ipCanvas);
       }
+      const ipCtx = ipCanvas.getContext('2d');
+
+      // open WebSocket to proxy
+      const ws = new WebSocket(wsUrl);
+      ws.binaryType = 'arraybuffer';
+
+      await new Promise((resolve, reject) => {
+        ws.onopen  = resolve;
+        ws.onerror = () => reject(new Error('WebSocket connection failed'));
+        setTimeout(() => reject(new Error('WebSocket timeout after 10s')), 10000);
+      });
+
+      console.log('[Detector] WebSocket connected to proxy ✓');
+
+      // each message = one raw JPEG frame
+      ws.onmessage = (event) => {
+        const blob = new Blob([event.data], { type: 'image/jpeg' });
+        const url  = URL.createObjectURL(blob);
+        const img  = new Image();
+        img.onload = () => {
+          ipCtx.drawImage(img, 0, 0, ipCanvas.width, ipCanvas.height);
+          URL.revokeObjectURL(url);   // free memory
+        };
+        img.src = url;
+      };
+
+      ws.onclose = () => {
+        console.warn('[Detector] WebSocket closed');
+        Signals.emit('camera:error', { message: 'IP camera stream disconnected' });
+      };
+
+      // use the hidden canvas as detection source
+      video = ipCanvas;
+      Canvas.resizeToImg(ipCanvas);
+      startDetectionLoop();
+      Signals.emit('camera:started', { source: 'ip', url: wsUrl });
+      console.log('[Detector] IP Camera (WebSocket) connected ✓');
 
     } catch (err) {
       console.error('[Detector] IP Camera error:', err);
@@ -129,8 +153,13 @@ const Detector = (() => {
   async function detectFrame() {
     if (!isRunning) return;
 
-    // only detect if video is playing and has real dimensions
-    if (video.readyState >= 2 && video.videoWidth > 0) {
+    // check readiness based on element type
+    const tag     = video.tagName;
+    const isReady = tag === 'CANVAS' ? (video.width > 0 && video.height > 0)
+                  : tag === 'IMG'    ? (video.naturalWidth > 0)
+                  :                    (video.readyState >= 2 && video.videoWidth > 0);
+
+    if (isReady) {
       try {
         const predictions = await model.detect(video);
 
@@ -148,7 +177,6 @@ const Detector = (() => {
         frameCount++;
 
       } catch (err) {
-        // single frame error — don't stop the loop
         console.warn('[Detector] Frame detection error:', err);
       }
     }
@@ -165,14 +193,23 @@ const Detector = (() => {
   }
 
   function stopStream() {
+    // stop webcam tracks if active
     if (stream) {
       stream.getTracks().forEach(t => t.stop());
       stream = null;
     }
-    if (video) {
-      video.srcObject = null;
-      video.src = '';
+    // clear video element
+    const videoEl = document.getElementById('video');
+    if (videoEl) {
+      videoEl.srcObject = null;
+      videoEl.src = '';
     }
+    // clear mjpeg img element if exists
+    const imgEl = document.getElementById('mjpeg-img');
+    if (imgEl) imgEl.src = '';
+
+    // reset video ref back to the actual video element
+    video = document.getElementById('video');
   }
 
   // ---------- FPS COUNTER ----------
@@ -252,8 +289,6 @@ const Detector = (() => {
   return { init, startWebcam, startIPCamera, stop };
 
 })();
-
-
 
 // ---------- BOOT ----------
 window.addEventListener('DOMContentLoaded', () => {

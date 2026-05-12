@@ -10,7 +10,9 @@ const Canvas = (() => {
   // ---------- DOM ----------
   const canvas = document.getElementById('canvas');
   const ctx    = canvas.getContext('2d');
-  const video  = document.getElementById('video');
+
+  // activeSource: updated when camera switches (video or img)
+  let activeSource = document.getElementById('video');
 
   // ---------- COLORS ----------
   const COLORS = {
@@ -32,6 +34,18 @@ const Canvas = (() => {
   // ---------- RESIZE ----------
   // Match canvas pixel size to video dimensions
   function resizeToVideo(videoEl) {
+    activeSource = videoEl;
+    const resize = () => {
+      const rect = canvas.parentElement.getBoundingClientRect();
+      canvas.width  = rect.width;
+      canvas.height = rect.height;
+    };
+    resize();
+    window.addEventListener('resize', resize);
+  }
+
+  function resizeToImg(imgEl) {
+    activeSource = imgEl;
     const resize = () => {
       const rect = canvas.parentElement.getBoundingClientRect();
       canvas.width  = rect.width;
@@ -42,34 +56,45 @@ const Canvas = (() => {
   }
 
   // ---------- MAIN DRAW CALL ----------
-  // Called every frame from detector.js
-  function draw(videoEl, rawPeople) {
+  function draw(source, rawPeople) {
     const W = canvas.width;
     const H = canvas.height;
 
-    // 1. Clear
     ctx.clearRect(0, 0, W, H);
-
-    // 2. Draw video frame onto canvas
-    drawVideoFrame(videoEl, W, H);
-
-    // 3. Draw the virtual line
+    drawVideoFrame(source, W, H);
     drawVirtualLine(W, H);
 
-    // 4. Draw each tracked person (boxes + IDs + trails)
     const tracked = Tracker.getTracked();
     drawTrackedPeople(tracked, W, H);
-
-    // 5. Scan-line overlay (CCTV aesthetic)
     drawScanOverlay(W, H);
   }
 
   // ---------- VIDEO FRAME ----------
-  function drawVideoFrame(videoEl, W, H) {
-    if (videoEl.readyState >= 2) {
-      ctx.drawImage(videoEl, 0, 0, W, H);
+  function drawVideoFrame(source, W, H) {
+    const tag = source.tagName;
+
+    // canvas element (WebSocket IP cam) — always ready if it exists
+    if (tag === 'CANVAS') {
+      ctx.drawImage(source, 0, 0, W, H);
+      return;
+    }
+
+    // img element — ready when naturalWidth > 0
+    if (tag === 'IMG') {
+      if (source.naturalWidth > 0) {
+        ctx.drawImage(source, 0, 0, W, H);
+      } else {
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, W, H);
+        drawNoFeedText(W, H);
+      }
+      return;
+    }
+
+    // video element — ready when readyState >= 2
+    if (source.readyState >= 2) {
+      ctx.drawImage(source, 0, 0, W, H);
     } else {
-      // no feed yet — draw black background
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, W, H);
       drawNoFeedText(W, H);
@@ -276,16 +301,21 @@ const Canvas = (() => {
   }
 
   // ---------- SCALE HELPER ----------
-  // COCO-SSD gives bbox in video pixel coords
+  // COCO-SSD gives bbox in source pixel coords
   // We need to map them to canvas display coords
   function scaleBbox(bbox, W, H) {
-    const scaleX = W / (video.videoWidth  || W);
-    const scaleY = H / (video.videoHeight || H);
+    const tag     = activeSource.tagName;
+    const sourceW = tag === 'VIDEO'  ? (activeSource.videoWidth   || W)
+                  : tag === 'CANVAS' ? (activeSource.width        || W)
+                  :                    (activeSource.naturalWidth  || W);
+    const sourceH = tag === 'VIDEO'  ? (activeSource.videoHeight  || H)
+                  : tag === 'CANVAS' ? (activeSource.height       || H)
+                  :                    (activeSource.naturalHeight || H);
     return [
-      bbox[0] * scaleX,
-      bbox[1] * scaleY,
-      bbox[2] * scaleX,
-      bbox[3] * scaleY,
+      bbox[0] * (W / sourceW),
+      bbox[1] * (H / sourceH),
+      bbox[2] * (W / sourceW),
+      bbox[3] * (H / sourceH),
     ];
   }
 
@@ -310,6 +340,6 @@ const Canvas = (() => {
   }
 
   // ---------- PUBLIC API ----------
-  return { draw, resizeToVideo, flashEdge };
+  return { draw, resizeToVideo, resizeToImg, flashEdge };
 
 })();
